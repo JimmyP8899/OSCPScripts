@@ -85,7 +85,6 @@ def resolve_hostname(ip):
     return "-"
 
 def run_nmap_scan(ip):
-    # Run a single nmap scan for OS detection and top 50 ports open
     cmd = ["nmap", "-O", "--top-ports", "50", "-Pn", ip]
     log(f"Running nmap scan on {ip}", "command")
     try:
@@ -101,12 +100,10 @@ def parse_nmap_output(output):
 
     for line in output.splitlines():
         line = line.strip()
-        # OS info detection
-        if line.lower().startswith("os details:") or line.lower().startswith("running:"):
+        if re.match(r"^(OS details:|Running:|Aggressive OS guesses:)", line, re.IGNORECASE):
             parts = line.split(":", 1)
-            if len(parts) > 1:
+            if len(parts) > 1 and parts[1].strip():
                 os_info = parts[1].strip()
-        # Open ports detection
         port_match = re.match(r"^(\d+)\/tcp\s+open", line)
         if port_match:
             open_ports.append(port_match.group(1))
@@ -138,7 +135,6 @@ def main():
     output_dir = os.path.abspath(args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Step 1: Ping sweep
     live = ping_sweep(args.network, threads=args.threads)
     if not live:
         log("No live hosts found.", "error")
@@ -157,7 +153,6 @@ def main():
             except Exception as e:
                 log(f"Error scanning {ip}: {e}", "error")
 
-    # Column widths and formatting with pipes
     IP_COL = 16
     HOSTNAME_COL = 15
     OS_COL = 60
@@ -169,10 +164,19 @@ def main():
         f.write(header)
         total_width = IP_COL + 3 + HOSTNAME_COL + 3 + OS_COL + 3 + PORTS_COL
         f.write("=" * total_width + "\n")
+
         for r in results:
             open_ports_str = ",".join(r["open_ports"]) if r["open_ports"] != ["-"] else "-"
-            os_info = r['os_info'].replace("\n", " ").strip()
-            f.write(f"{r['ip']:<{IP_COL}} | {r['hostname']:<{HOSTNAME_COL}} | {os_info:<{OS_COL}} | {open_ports_str:<{PORTS_COL}}\n")
+            os_lines = re.split(r",\s*(?=Microsoft|Windows|Linux|FreeBSD|Cisco|MikroTik)", r["os_info"])
+            os_lines = [line.strip() for line in os_lines if line.strip()]
+
+            for idx, os_line in enumerate(os_lines):
+                ip_str = r["ip"] if idx == 0 else ""
+                host_str = r["hostname"] if idx == 0 else ""
+                port_str = open_ports_str if idx == 0 else ""
+                f.write(f"{ip_str:<{IP_COL}} | {host_str:<{HOSTNAME_COL}} | {os_line:<{OS_COL}} | {port_str:<{PORTS_COL}}\n")
+            
+            f.write("-" * total_width + "\n")
 
     log(f"Summary saved to {live_hosts_file}", "success")
 
