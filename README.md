@@ -6,3 +6,4 @@ Scripts to automatically enumerate machines for the OSCP exam
 
 # Things to implement
 - nikto script shoudl output the directory infomration not just standard output
+- script to pull all tools 
