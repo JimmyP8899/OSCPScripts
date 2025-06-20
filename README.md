@@ -8,3 +8,4 @@ Scripts to automatically enumerate machines for the OSCP exam
 - nikto script shoudl output the directory infomration not just standard output
 - script to pull all tools 
 - run assessment on regular nmap output then double check with fullscan
+- check smbmap bug
