@@ -215,7 +215,7 @@ def enumerate_web_port(ip, hostname, port, base_out):
     if hostname:
         threads.append(threading.Thread(target=run_and_log, args=(
             f"gobuster vhost -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt "
-            f"-u {url} --exclude-length 334 --status-codes-blacklist 400,404,500",
+            f"-u {url} --exclude-length 334",
             os.path.join(port_dir, "gobuster_vhost.txt"),
             "gobuster vhost"
         )))
