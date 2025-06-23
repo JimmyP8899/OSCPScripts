@@ -7,6 +7,7 @@ import re
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import requests
 
 def log(msg, level="info"):
     colors = {
@@ -64,14 +65,20 @@ def add_to_hosts(ip, hostname):
     entry = f"{ip}\t{hostname}"
     try:
         with open("/etc/hosts", "r") as f:
-            if hostname in f.read():
-                log("/etc/hosts already contains this entry.", level="info")
+            hosts_content = f.read()
+            if entry in hosts_content:
+                log(f"/etc/hosts already contains exact entry: {entry}, skipping add.", level="info")
+                return
+            if hostname in hosts_content or ip in hosts_content:
+                log(f"/etc/hosts contains {hostname} or {ip}, skipping add to avoid duplicates.", level="info")
                 return
         with open("/etc/hosts", "a") as f:
             f.write(f"\n{entry}\n")
         log(f"Added to /etc/hosts: {entry}", level="success")
     except PermissionError:
         log("Permission denied to write to /etc/hosts. Run as root if needed.", level="error")
+    except Exception as e:
+        log(f"Error writing to /etc/hosts: {e}", level="error")
 
 def extract_web_ports(nmap_output_path):
     log("Extracting web ports from full scan output...", level="action")
@@ -136,14 +143,42 @@ def dns_check(ip, domain, output_file):
     run_command_sync(f"dig any {domain} @{ip}", output_file)
     log("Finished: dig DNS query", level="success")
 
-def url_with_port(ip, port):
-    return f"https://{ip}" if port == 443 else f"http://{ip}:{port}"
+def url_with_port(ip_or_host, port):
+    return f"https://{ip_or_host}" if port == 443 else f"http://{ip_or_host}:{port}"
+
+def check_redirect(ip, port):
+    url = url_with_port(ip, port)
+    try:
+        # Using requests without verify and small timeout
+        resp = requests.get(url, allow_redirects=False, timeout=5)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location", "")
+            if location:
+                # Extract hostname from redirect location
+                match = re.search(r"https?://([^/:]+)", location)
+                if match:
+                    redirect_host = match.group(1)
+                    log(f"Redirect detected on {ip}:{port} to {redirect_host}", level="success")
+                    return redirect_host
+        log(f"No redirect detected on {ip}:{port}", level="info")
+        return None
+    except Exception as e:
+        log(f"No redirect or failed on {ip}:{port} — {e}", level="info")
+        return None
 
 def enumerate_web_port(ip, hostname, port, base_out):
     port_dir = os.path.join(base_out, f"{port}_HTTP")
     os.makedirs(port_dir, exist_ok=True)
-    url = url_with_port(ip, port)
-    host = hostname if hostname else ip
+
+    # Determine URL host (prefer hostname if set)
+    host_to_use = hostname if hostname else ip
+    # Check for redirect and add to /etc/hosts if redirect hostname found
+    redirect_host = check_redirect(ip, port)
+    if redirect_host:
+        add_to_hosts(ip, redirect_host)
+        host_to_use = redirect_host  # override to use redirect hostname in URLs
+
+    url = url_with_port(host_to_use, port)
 
     log(f"Checking for robots.txt and .git on port {port}", level="action")
 
@@ -159,18 +194,19 @@ def enumerate_web_port(ip, hostname, port, base_out):
             ".git/HEAD"
         )),
         threading.Thread(target=run_and_log, args=(
-            f"nikto -h {url}",
+            f"nikto -h {url} -Format txt -output {os.path.join(port_dir, 'nikto.txt')}",
             os.path.join(port_dir, "nikto.txt"),
             "nikto"
         )),
         threading.Thread(target=run_and_log, args=(
-            f"whatweb {host}",
+            f"whatweb {url}",
             os.path.join(port_dir, "whatweb.txt"),
             "whatweb"
         )),
         threading.Thread(target=run_and_log, args=(
             f"feroxbuster -u {url} -w /usr/share/wordlists/dirb/common.txt "
-            f"-x .php,.phtml,.xml,.aspx --filter-status 404,400,403",
+            f"-x .php,.phtml,.xml,.aspx --filter-status 404,400,403 --dont-filter "
+            f"-o {os.path.join(port_dir, 'feroxbuster.txt')}",
             os.path.join(port_dir, "feroxbuster.txt"),
             "feroxbuster"
         ))
@@ -204,6 +240,16 @@ def parse_services(nmap_output_path):
                 service = m.group(2).lower()
                 services[port] = service
     return services
+
+def web_enumeration(ip, hostname, base_out, web_ports):
+    log("Starting parallel web enumeration for detected HTTP services...", level="action")
+    with ThreadPoolExecutor(max_workers=len(web_ports)) as executor:
+        futures = []
+        for port in web_ports:
+            log(f"Enumerating port {port}", level="action")
+            futures.append(executor.submit(enumerate_web_port, ip, hostname, port, base_out))
+        for future in futures:
+            future.result()  # wait for all to finish
 
 def main():
     parser = argparse.ArgumentParser(description="Automated recon with full logging")
@@ -252,7 +298,6 @@ def main():
         ftp_dir = os.path.join(output_dir, "21_ftp")
         os.makedirs(ftp_dir, exist_ok=True)
         ftp_check_anonymous(ip)
-        # You can save FTP related files in ftp_dir if you expand checks here
 
     # SMB handling - common SMB ports 445 and 139
     smb_ports = [port for port, svc in services.items() if svc in ("microsoft-ds", "netbios-ssn", "smb")]
@@ -277,17 +322,6 @@ def main():
         log("No HTTP services found.", level="info")
 
     log("All scans and enumeration steps finished.", level="success")
-
-def web_enumeration(ip, hostname, base_out, web_ports):
-    log("Starting parallel web enumeration for detected HTTP services...", level="action")
-    with ThreadPoolExecutor(max_workers=len(web_ports)) as executor:
-        futures = []
-        for port in web_ports:
-            log(f"Enumerating port {port}", level="action")
-            futures.append(executor.submit(enumerate_web_port, ip, hostname, port, base_out))
-        for future in futures:
-            future.result()  # wait for all to finish
-
 
 if __name__ == "__main__":
     main()
