@@ -215,7 +215,7 @@ def enumerate_web_port(ip, hostname, port, base_out):
     if hostname:
         threads.append(threading.Thread(target=run_and_log, args=(
             f"gobuster vhost -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt "
-            f"-u {url} --exclude-length 334",
+            f"-u {url} --exclude-length 334 --status-codes-blacklist 400,404,500",
             os.path.join(port_dir, "gobuster_vhost.txt"),
             "gobuster vhost"
         )))
@@ -240,6 +240,21 @@ def parse_services(nmap_output_path):
                 service = m.group(2).lower()
                 services[port] = service
     return services
+
+def run_nmap_smb(ip, output_dir):
+    outfile = os.path.join(output_dir, "nmap_smb_445.txt")
+    cmd = f"nmap -p 445 --script smb* {ip} -oN {outfile}"
+    run_command_sync(cmd, outfile)
+
+def run_nmap_ldap(ip, output_dir):
+    outfile = os.path.join(output_dir, "nmap_ldap_389_636.txt")
+    cmd = f"nmap -p 389,636 --script ldap* {ip} -oN {outfile}"
+    run_command_sync(cmd, outfile)
+
+def run_nmap_smtp(ip, output_dir):
+    outfile = os.path.join(output_dir, "nmap_smtp_25.txt")
+    cmd = f"nmap -p 25 --script smtp-open-relay {ip} -oN {outfile}"
+    run_command_sync(cmd, outfile)
 
 def web_enumeration(ip, hostname, base_out, web_ports):
     log("Starting parallel web enumeration for detected HTTP services...", level="action")
@@ -299,13 +314,34 @@ def main():
         os.makedirs(ftp_dir, exist_ok=True)
         ftp_check_anonymous(ip)
 
-    # SMB handling - common SMB ports 445 and 139
-    smb_ports = [port for port, svc in services.items() if svc in ("microsoft-ds", "netbios-ssn", "smb")]
-    for port in smb_ports:
-        smb_dir = os.path.join(output_dir, f"{port}_smb")
-        os.makedirs(smb_dir, exist_ok=True)
-        run_command_sync(f"smbmap -H {ip}", os.path.join(smb_dir, "smbmap.txt"))
-        log(f"Finished: smbmap in {port}_smb directory", level="success")
+    # SMB handling with conditional Nmap scripts scan
+    if 445 in services:
+        log("SMB detected on port 445, launching SMB Nmap script scan...", level="info")
+        t_smb = threading.Thread(target=run_nmap_smb, args=(ip, output_dir))
+        t_smb.start()
+    else:
+        log("SMB service (port 445) not found, skipping SMB script scan.", level="info")
+
+    # LDAP handling with conditional Nmap scripts scan
+    if 389 in services or 636 in services:
+        log("LDAP detected on ports 389/636, launching LDAP Nmap script scan...", level="info")
+        t_ldap = threading.Thread(target=run_nmap_ldap, args=(ip, output_dir))
+        t_ldap.start()
+    else:
+        log("LDAP service (ports 389/636) not found, skipping LDAP script scan.", level="info")
+
+    # SMTP handling with conditional Nmap scripts scan
+    if 25 in services:
+        log("SMTP detected on port 25, launching SMTP Nmap script scan...", level="info")
+        t_smtp = threading.Thread(target=run_nmap_smtp, args=(ip, output_dir))
+        t_smtp.start()
+    else:
+        log("SMTP service (port 25) not found, skipping SMTP script scan.", level="info")
+
+    # Wait for SMB, LDAP, SMTP scans to complete if started
+    for t in ["t_smb", "t_ldap", "t_smtp"]:
+        if t in locals():
+            locals()[t].join()
 
     # DNS dig if DNS present - assume domain from hostname or fallback
     if any("domain" in svc for svc in services.values()):
