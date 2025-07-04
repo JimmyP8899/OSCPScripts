@@ -95,7 +95,7 @@ def run_nmap_scan(ip):
         return ""
 
 def parse_nmap_output(output):
-    os_info = "-"
+    os_lines = []
     open_ports = []
 
     for line in output.splitlines():
@@ -103,13 +103,15 @@ def parse_nmap_output(output):
         if re.match(r"^(OS details:|Running:|Aggressive OS guesses:)", line, re.IGNORECASE):
             parts = line.split(":", 1)
             if len(parts) > 1 and parts[1].strip():
-                os_info = parts[1].strip()
+                os_lines.append(parts[1].strip())
         port_match = re.match(r"^(\d+)\/tcp\s+open", line)
         if port_match:
             open_ports.append(port_match.group(1))
 
     if not open_ports:
         open_ports = ["-"]
+
+    os_info = ", ".join(os_lines) if os_lines else "-"
 
     return os_info, open_ports
 
