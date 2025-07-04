@@ -203,13 +203,17 @@ def enumerate_web_port(ip, hostname, port, base_out):
             os.path.join(port_dir, "whatweb.txt"),
             "whatweb"
         )),
-        threading.Thread(target=run_and_log, args=(
-            f"feroxbuster -u {url} -w /usr/share/wordlists/dirb/common.txt "
-            f"-x .php,.phtml,.xml,.aspx --filter-status 404,400,403 --dont-filter "
-            f"-o {os.path.join(port_dir, 'feroxbuster.txt')}",
+        threads.append(threading.Thread(target=run_and_log, args=(
+            f"feroxbuster -u {url} "
+            f"-w /usr/share/wordlists/dirb/common.txt "
+            f"-x .php,.phtml,.xml,.aspx "
+            f"--filter-status 404,400,403 "
+            f"--dont-filter "
+            f"--no-state --quiet --color never "
+            f"> {os.path.join(port_dir, 'feroxbuster.txt')} 2>&1",
             os.path.join(port_dir, "feroxbuster.txt"),
             "feroxbuster"
-        ))
+        )))
     ]
 
     if hostname:
@@ -350,7 +354,13 @@ def main():
         dns_check(ip, domain, dns_out)
 
     # Web enumeration ports
-    web_ports = [port for port, svc in services.items() if "http" in svc]
+    web_ports = []
+    for port, svc in services.items():
+        if "http" in svc.lower():
+            if "microsoft windows rpc over http 1.0" in svc.lower():
+                log(f"Skipping port {port} (service: '{svc}') — not a real website", level="info")
+            else:
+                web_ports.append(port)
 
     if web_ports:
         web_enumeration(ip, hostname, output_dir, web_ports)
@@ -361,3 +371,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
