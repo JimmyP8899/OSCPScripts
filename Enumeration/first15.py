@@ -356,8 +356,17 @@ def main():
     # Web enumeration ports
     web_ports = []
     for port, svc in services.items():
-        if "http" in svc.lower():
-            if "microsoft windows rpc over http 1.0" in svc.lower():
+        svc_lc = svc.lower()
+        if "http" in svc_lc:
+            excluded_substrings = [
+                "microsoft windows rpc over http 1.0",
+                "microsoft httpapi",
+                "ncacn_http",
+                "rpc-http",
+                "ssdp",
+                "upnp"
+            ]
+            if any(bad in svc_lc for bad in excluded_substrings):
                 log(f"Skipping port {port} (service: '{svc}') — not a real website", level="info")
             else:
                 web_ports.append(port)
