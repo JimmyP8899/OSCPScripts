@@ -232,20 +232,18 @@ def enumerate_web_port(ip, hostname, port, base_out):
         t.join()
 
 def parse_services(nmap_output_path):
-    """
-    Parses nmap full scan output to get open ports and their service names.
-    Returns a dict: {port: service_name}
-    """
     services = {}
     with open(nmap_output_path, "r") as f:
         for line in f:
-            # match lines like: 21/tcp   open  ftp
-            m = re.match(r"^(\d+)\/tcp\s+open\s+(\S+)", line)
+            m = re.match(r"^(\d+)\/tcp\s+open\s+(\S+)\s+(.*)", line)
             if m:
                 port = int(m.group(1))
                 service = m.group(2).lower()
-                services[port] = service
+                details = m.group(3).lower()
+                full_service = f"{service} {details}"
+                services[port] = full_service
     return services
+
 
 def run_nmap_smb(ip, output_dir):
     outfile = os.path.join(output_dir, "nmap_smb_445.txt")
