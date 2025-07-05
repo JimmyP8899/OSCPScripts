@@ -202,19 +202,21 @@ def enumerate_web_port(ip, hostname, port, base_out):
             f"whatweb {url}",
             os.path.join(port_dir, "whatweb.txt"),
             "whatweb"
-        )),
-        threads.append(threading.Thread(target=run_and_log, args=(
-            f"feroxbuster -u {url} "
-            f"-w /usr/share/wordlists/dirb/common.txt "
-            f"-x .php,.phtml,.xml,.aspx "
-            f"--filter-status 404,400,403 "
-            f"--dont-filter "
-            f"--no-state --quiet --color never "
-            f"> {os.path.join(port_dir, 'feroxbuster.txt')} 2>&1",
-            os.path.join(port_dir, "feroxbuster.txt"),
-            "feroxbuster"
-        )))
-    ]
+        ))]
+
+    #  Append feroxbuster after initialization
+    threads.append(threading.Thread(target=run_and_log, args=(
+        f"feroxbuster -u {url} "
+        f"-w /usr/share/wordlists/dirb/common.txt "
+        f"-x .php,.phtml,.xml,.aspx "
+        f"--filter-status 404,400,403 "
+        f"--dont-filter "
+        f"--no-state --quiet --color never "
+        f"> {os.path.join(port_dir, 'feroxbuster.txt')} 2>&1",
+        os.path.join(port_dir, "feroxbuster.txt"),
+        "feroxbuster"
+    )))
+
 
     if hostname:
         threads.append(threading.Thread(target=run_and_log, args=(
@@ -352,7 +354,6 @@ def main():
         domain = hostname if hostname else "example.com"
         dns_out = os.path.join(output_dir, "dns_dig.txt")
         dns_check(ip, domain, dns_out)
-
     # Web enumeration ports
     web_ports = []
     for port, svc in services.items():
@@ -380,4 +381,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
