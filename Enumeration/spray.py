@@ -64,8 +64,8 @@ def is_host_up(ip):
     result = subprocess.run(["ping", param, "1", str(ip)], stdout=subprocess.DEVNULL)
     return result.returncode == 0
 
-def check_smb(ip, username, password, hash_mode):  # <-- updated
-    auth_flag = f"-H '{password}'" if hash_mode else f"-p '{password}'"  # <-- updated
+def check_smb(ip, username, password, hash_mode):
+    auth_flag = f"-H '{password}'" if hash_mode else f"-p '{password}'"
     cmd = f"crackmapexec smb {ip} -u '{username}' {auth_flag} --no-bruteforce"
     try:
         result = subprocess.run(
@@ -80,23 +80,66 @@ def check_smb(ip, username, password, hash_mode):  # <-- updated
     except subprocess.TimeoutExpired:
         return "[bold green][SMB][/bold green] [yellow]TIMEOUT[/yellow]"
 
-    valid_indicator = False
+    # Check for success
     for line in output.splitlines():
         if f"SMB" in line and ip in line and "[+]" in line:
-            valid_indicator = True
-            break
+            return "[bold green][SMB][/bold green] [green]VALID[/green]"
 
-    if valid_indicator:
-        return "[bold green][SMB][/bold green] [green]VALID[/green]"
-    elif any(err in output.lower() for err in ["logon failure", "access denied", "nt_status_logon_failure"]):
+    # Failure indicators (including 'failure')
+    failure_indicators = [
+        "failure",
+        "access denied",
+        "nt_status_logon_failure",
+        "status_logon_failure",
+        "failed to authenticate",
+        "authentication failed",
+        "permission denied",
+        "authentication error",
+    ]
+
+    # Check for failure
+    output_lower = output.lower()
+    if any(indicator in output_lower for indicator in failure_indicators):
         return "[bold green][SMB][/bold green] [red]INVALID[/red]"
-    else:
-        return "[bold green][SMB][/bold green] [yellow]UNKNOWN[/yellow]"
 
-def check_winrm(ip, username, password, hash_mode):  # <-- updated
-    auth_flag = f"-H '{password}'" if hash_mode else f"-p '{password}'"  # <-- updated
-    output = run_command(f"crackmapexec winrm {ip} -u '{username}' {auth_flag}")
-    return "[bold cyan][WINRM][/bold cyan] " + ("[green]VALID[/green]" if "[+]" in output and "Pwn3d!" in output else "[red]INVALID[/red]")
+    # If neither success nor failure indicators found
+    return "[bold green][SMB][/bold green] [yellow]UNKNOWN[/yellow]"
+
+def check_winrm(ip, username, password, hash_mode, domain=None):
+    def run_cme(domain_param):
+        auth_flag = f"-H '{password}'" if hash_mode else f"-p '{password}'"
+        domain_flag = f"-d '{domain_param}'" if domain_param else ""
+        cmd = f"crackmapexec winrm {ip} -u '{username}' {auth_flag} {domain_flag}".strip()
+        return run_command(cmd)
+
+    def has_success(output):
+        return any("[+]" in line and "WINRM" in line for line in output.splitlines())
+
+    def has_failure(output):
+        return any("[-]" in line and "WINRM" in line for line in output.splitlines())
+
+    # Run with user-specified domain if provided
+    if domain:
+        output_domain = run_cme(domain)
+        if has_success(output_domain):
+            return f"[bold cyan][WINRM][/bold cyan] [green]VALID[/green] (domain: {domain})"
+        if has_failure(output_domain):
+            # If domain run fails, try local domain before returning INVALID
+            output_local = run_cme(".")
+            if has_success(output_local):
+                return "[bold cyan][WINRM][/bold cyan] [green]VALID[/green] (local)"
+            if has_failure(output_local):
+                return "[bold cyan][WINRM][/bold cyan] [red]INVALID[/red] (local)"
+            return "[bold cyan][WINRM][/bold cyan] [yellow]UNKNOWN[/yellow]"
+
+    # If no domain specified, try local domain only
+    output_local = run_cme(".")
+    if has_success(output_local):
+        return "[bold cyan][WINRM][/bold cyan] [green]VALID[/green] (local)"
+    if has_failure(output_local):
+        return "[bold cyan][WINRM][/bold cyan] [red]INVALID[/red] (local)"
+
+    return "[bold cyan][WINRM][/bold cyan] [yellow]UNKNOWN[/yellow]"
 
 def check_rpc(ip, username, password, hash_mode):  # <-- updated
     if hash_mode:
@@ -156,10 +199,10 @@ def check_psexec(ip, username, password, hash_mode):  # <-- updated
     else:
         return "[bold yellow][WMI (PSEXEC)][/bold yellow] [yellow]UNKNOWN[/yellow]"
 
-def check_host(ip, username, password, hash_mode):  # <-- updated
+def check_host(ip, username, password, hash_mode, domain):
     print(f"[bold white]Checking {ip}[/bold white]")
     print(check_smb(ip, username, password, hash_mode))
-    print(check_winrm(ip, username, password, hash_mode))
+    print(check_winrm(ip, username, password, hash_mode, domain))
     print(check_ssh(ip, username, password, hash_mode))
     print(check_psexec(ip, username, password, hash_mode))
     print(check_rpc(ip, username, password, hash_mode))
@@ -168,16 +211,27 @@ def check_host(ip, username, password, hash_mode):  # <-- updated
 
 def main():
     parser = argparse.ArgumentParser(description="Credential checker across SMB, SSH, WinRM, and psexec")
-    parser.add_argument("-u", "--username", required=True, help="Username")
-    parser.add_argument("-p", "--password", help="Password or NTLM hash")
-    #parser.add_argument("--hash", action="store_true", help="Treat password as NTLM hash")
+    parser.add_argument("-u", "--username", required=True, help="Username or path to username file")
+    parser.add_argument("-p", "--password", required=True, help="Password or NTLM hash or path to password file")
     parser.add_argument("-s", "--subnet", required=True, help="Target subnet in CIDR format (e.g., 192.168.1.0/24)")
-    parser.add_argument("--hash", action="store_true", help="Treat password as NTLM hash")  # <-- added
-    
+    parser.add_argument("--hash", action="store_true", help="Treat password as NTLM hash")
+    parser.add_argument("-d", "--domain", default=None, help="Domain name (optional). If not provided, will try local login.")
+
     args = parser.parse_args()
-    if not args.password and not args.hash:
-        parser.error("You must supply either --password or --hash with -p <hash>")
-    hash_mode = args.hash  # <-- added
+    hash_mode = args.hash
+
+    # Check if username/password inputs are files
+    if os.path.isfile(args.username):
+        with open(args.username, "r") as f:
+            usernames = [line.strip() for line in f if line.strip()]
+    else:
+        usernames = [args.username]
+
+    if os.path.isfile(args.password):
+        with open(args.password, "r") as f:
+            passwords = [line.strip() for line in f if line.strip()]
+    else:
+        passwords = [args.password]
 
     subnet = ipaddress.ip_network(args.subnet, strict=False)
     live_hosts = []
@@ -193,7 +247,11 @@ def main():
     console.print(f"\n[bold green][+] {len(live_hosts)} hosts are up. Starting credential checks...[/bold green]\n")
 
     for ip in live_hosts:
-        check_host(ip, args.username, args.password, hash_mode)
+        for username in usernames:
+            for password in passwords:
+                console.print(f"[blue]Trying {username}:{password} on {ip}[/blue]")
+                check_host(ip, username, password, hash_mode, args.domain)
+
 
 if __name__ == "__main__":
     main()
