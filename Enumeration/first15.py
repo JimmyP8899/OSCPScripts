@@ -287,9 +287,9 @@ def main():
     nmap_udp = os.path.join(output_dir, "UDP.txt")
     nuclei_output = os.path.join(output_dir, "nuclei.txt")
 
-    proc_scripts, fh_scripts = run_command_async(f"nmap -sVC {ip} -Pn --open", nmap_scripts)
-    proc_full, fh_full = run_command_async(f"nmap -p- -sVC {ip} -Pn --open", nmap_fullscan)
-    proc_udp, fh_udp = run_command_async(f"nmap -p- -sU --max-retries 1 --min-rate 5000 -Pn --open {ip}", nmap_udp)
+    proc_scripts, fh_scripts = run_command_async(f"nmap -sVC {ip} -Pn --open --unprivileged", nmap_scripts)
+    proc_full, fh_full = run_command_async(f"nmap -p- -sVC {ip} -Pn --open --unprivileged", nmap_fullscan)
+    proc_udp, fh_udp = run_command_async(f"nmap -p- -sU --max-retries 1 --min-rate 5000 -Pn --open {ip} --unprivileged", nmap_udp)
     proc_nuclei, fh_nuclei = run_command_async(f"nuclei -u {ip}", nuclei_output)
 
     threading.Thread(target=watch_proc, args=(proc_scripts, fh_scripts, "nmap.txt")).start()
@@ -379,3 +379,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
