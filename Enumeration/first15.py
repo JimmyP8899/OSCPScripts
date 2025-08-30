@@ -207,7 +207,7 @@ def enumerate_web_port(ip, hostname, port, base_out):
     #  Append feroxbuster after initialization
     threads.append(threading.Thread(target=run_and_log, args=(
         f"feroxbuster -u {url} "
-        f"-w /usr/share/wordlists/dirb/common.txt "
+        f"-w /usr/share/wordlists/seclists/Discovery/Web-Content/directory-list-2.3-big.txt "
         f"-x .php,.phtml,.xml,.aspx "
         f"--filter-status 404,400,403 "
         f"--dont-filter "
@@ -379,5 +379,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
