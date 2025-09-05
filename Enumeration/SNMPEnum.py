@@ -1,3 +1,4 @@
+# Not really needed use bulksnmpwalk or enumerate extended objects with snmpwalk
 #!/usr/bin/env python3
 import argparse
 import subprocess
